@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>战队列表 - CnDotaPlan</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+    h1 { font-size: 1.4rem; }
+    .usage { background: #252540; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-size: 0.9rem; color: #aaa; }
+    .usage code { color: #8af; }
+    button { padding: 10px 20px; background: #4a4a8e; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #5a5a9e; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #333; }
+    th { color: #888; font-weight: 600; }
+    tr:hover { background: #252540; }
+    .tag { color: #8af; }
+    a { color: #6af; }
+    .loading { color: #888; }
+    .err { color: #f88; }
+  </style>
+</head>
+<body>
+  <h1>战队列表</h1>
+  <p>从 OpenDota 拉取职业战队，选择战队后可查看该队最近 30 场比赛。</p>
+  <div class="usage">
+    <strong>使用方式：</strong><br>
+    1. 点击「加载战队列表」拉取数据<br>
+    2. 在表格中点击「最近 30 场」查看该队比赛列表（HTML 展示）<br>
+    3. 接口：<code>GET /api/teams</code>、<code>GET /api/teams/{id}/matches?limit=30</code>
+  </div>
+  <button type="button" id="btn">加载战队列表</button>
+  <p id="status" class="loading"></p>
+  <table id="table" style="display:none;">
+    <thead>
+      <tr>
+        <th>team_id</th>
+        <th>名称</th>
+        <th>Tag</th>
+        <th>胜 / 负</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <script>
+    var btn = document.getElementById('btn');
+    var status = document.getElementById('status');
+    var table = document.getElementById('table');
+    var tbody = document.getElementById('tbody');
+
+    btn.onclick = function() {
+      btn.disabled = true;
+      status.textContent = '加载中…';
+      status.className = 'loading';
+      fetch('/api/teams')
+        .then(function(r) { return r.json(); })
+        .then(function(teams) {
+          status.textContent = '共 ' + (teams && teams.length ? teams.length : 0) + ' 支战队';
+          status.className = '';
+          table.style.display = 'table';
+          tbody.innerHTML = '';
+          (teams || []).forEach(function(t) {
+            var tr = document.createElement('tr');
+            var wins = t.wins != null ? t.wins : '-';
+            var losses = t.losses != null ? t.losses : '-';
+            tr.innerHTML =
+              '<td>' + (t.team_id || '') + '</td>' +
+              '<td>' + (t.name || '') + '</td>' +
+              '<td class="tag">' + (t.tag || '') + '</td>' +
+              '<td>' + wins + ' / ' + losses + '</td>' +
+              '<td><a href="/teams/' + (t.team_id || '') + '/matches" target="_blank">最近 30 场</a></td>';
+            tbody.appendChild(tr);
+          });
+        })
+        .catch(function(e) {
+          status.textContent = '加载失败: ' + e.message;
+          status.className = 'err';
+        })
+        .then(function() { btn.disabled = false; });
+    };
+  </script>
+</body>
+</html>

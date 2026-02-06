@@ -1,0 +1,13 @@
+# 二进制与构建产物
+bin/
+*.exe
+/serve
+
+# Go
+*.test
+*.out
+vendor/
+
+# 本地/环境
+.env
+*.local
