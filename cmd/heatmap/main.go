@@ -1,5 +1,8 @@
-// 解析 .dem 并生成双方眼位热力图 HTML（单文件，可直接用浏览器打开）。
-// 用法: go run ./cmd/heatmap -dem <path> -matchid 123 -out heatmap.html
+// 解析 .dem 或读取眼位 JSON，生成双方眼位热力图 HTML（单文件，可直接用浏览器打开）。
+// 用法:
+//
+//	heatmap -dem <path> [-matchid id] [-out heatmap.html]
+//	heatmap -json <path> [-out heatmap.html]   # 使用 OpenDota 等眼位 JSON，见 docs/opendota_vision.md
 package main
 
 import (
@@ -8,24 +11,43 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cndotaplan/cndotaplan/internal/model"
 	"github.com/cndotaplan/cndotaplan/internal/parser"
 )
 
 func main() {
 	demPath := flag.String("dem", "", "路径: .dem 或 .dem.bz2 文件")
-	matchID := flag.Int64("matchid", 0, "比赛 ID（可选）")
+	jsonPath := flag.String("json", "", "路径: 眼位 JSON 文件（与 -dem 二选一，如 OpenDota 脚本输出）")
+	matchID := flag.Int64("matchid", 0, "比赛 ID（可选，仅 -dem 时有效）")
 	outPath := flag.String("out", "ward_heatmap.html", "输出 HTML 路径")
 	flag.Parse()
 
-	if *demPath == "" {
-		fmt.Fprintln(os.Stderr, "用法: heatmap -dem <path> [-matchid id] [-out heatmap.html]")
+	var records []model.WardRecord
+	switch {
+	case *jsonPath != "":
+		if *demPath != "" {
+			fmt.Fprintln(os.Stderr, "请只使用 -dem 或 -json 之一")
+			os.Exit(1)
+		}
+		data, err := os.ReadFile(*jsonPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "读取 JSON: %v\n", err)
+			os.Exit(1)
+		}
+		if err := json.Unmarshal(data, &records); err != nil {
+			fmt.Fprintf(os.Stderr, "解析 JSON: %v\n", err)
+			os.Exit(1)
+		}
+	case *demPath != "":
+		var err error
+		records, err = parser.ExtractWards(*demPath, *matchID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "解析失败: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "用法: heatmap -dem <path> 或 heatmap -json <path> [-out heatmap.html]")
 		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
-	records, err := parser.ExtractWards(*demPath, *matchID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "解析失败: %v\n", err)
 		os.Exit(1)
 	}
 

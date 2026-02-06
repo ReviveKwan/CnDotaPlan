@@ -30,7 +30,8 @@
     <strong>使用方式：</strong><br>
     1. 点击「加载战队列表」拉取数据<br>
     2. 在表格中点击「最近 30 场」查看该队比赛列表（HTML 展示）<br>
-    3. 接口：<code>GET /api/teams</code>、<code>GET /api/teams/{id}/matches?limit=30</code>
+    3. <a href="/heatmap">眼位热力图</a>：输入 match_id 查看该场眼位分布（数据来自 OpenDota Vision）<br>
+    4. 接口：<code>GET /api/teams</code>、<code>GET /api/teams/{id}/matches?limit=30</code>、<code>GET /api/heatmap?match_id=</code>
   </div>
   <button type="button" id="btn">加载战队列表</button>
   <p id="status" class="loading"></p>

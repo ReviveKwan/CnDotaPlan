@@ -12,3 +12,17 @@
 
 依赖：`pip install requests`  
 用法见脚本内注释。
+
+## fetch_opendota_wards.py（眼位 → 热力图）
+
+从 OpenDota 拉取**已解析**比赛的眼位数据（与 [Vision 页](https://www.opendota.com/matches/8678990124/vision) 同源），输出与 `WardRecord` 兼容的 JSON，用于生成地图眼位热力图（无需本地 .dem）。
+
+```bash
+# 输出眼位 JSON（需该场已被 OpenDota 解析）
+python3 scripts/fetch_opendota_wards.py 8678990124 > wards.json
+
+# 用 heatmap 生成热力图 HTML
+go run ./cmd/heatmap -json wards.json -out heatmap.html
+```
+
+详见 **docs/opendota_vision.md**。

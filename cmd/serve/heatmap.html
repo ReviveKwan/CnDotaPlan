@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>视野 - CnDotaPlan</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; background: #1a1a2e; color: #eee; }
+    .back { margin-bottom: 12px; }
+    .back a { color: #8af; text-decoration: none; }
+    .back a:hover { text-decoration: underline; }
+    .form-box { background: #252540; padding: 16px; border-radius: 8px; margin-bottom: 16px; max-width: 400px; }
+    .form-box input { padding: 8px 12px; width: 140px; margin-right: 8px; background: #1a1a2e; border: 1px solid #444; color: #eee; border-radius: 6px; }
+    .form-box button { padding: 8px 16px; background: #4a4a8e; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    .form-box .hint { font-size: 0.85rem; margin-top: 8px; }
+    .loading { color: #8af; }
+    .err { color: #e86; }
+
+    .vision-layout { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+    .vision-map-wrap { flex: 0 0 auto; background: #0f0f1a; border-radius: 8px; padding: 8px; }
+    .vision-map-wrap canvas { display: block; vertical-align: top; }
+    .vision-side { flex: 0 0 280px; }
+    .vision-side .section { background: #252540; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+    .vision-side .section-title { font-weight: 600; color: #ccc; margin-bottom: 10px; font-size: 0.95rem; }
+    .time-bar-wrap { margin-bottom: 8px; }
+    .time-bar-wrap label { font-size: 0.85rem; color: #888; display: block; margin-bottom: 4px; }
+    .time-bar-wrap input[type="range"] { width: 100%; }
+    .time-bar-wrap .time-label { font-variant-numeric: tabular-nums; font-size: 0.9rem; color: #8af; margin-top: 4px; }
+    .team-toggles label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+    .team-toggles input { width: 18px; height: 18px; }
+    .team-toggles .team-radiant { color: #6e8; }
+    .team-toggles .team-dire { color: #e86; }
+    #heatmap-section { display: none; }
+  </style>
+</head>
+<body>
+  <div class="back"><a href="/">← 返回首页</a></div>
+  <h1>视野</h1>
+  <p class="sub" style="color:#888;font-size:0.9rem;margin-bottom:16px;">数据来自 OpenDota 已解析录像，与 Vision 页同源</p>
+
+  <div id="form-section" class="form-box">
+    <label>比赛 ID (match_id)：</label>
+    <input type="text" id="match-id-input" placeholder="例如 8678990124" />
+    <button type="button" id="btn-go">加载视野</button>
+    <p id="form-msg" class="hint"></p>
+  </div>
+
+  <div id="heatmap-section">
+    <p style="color:#888;font-size:0.9rem;margin-bottom:12px;">match_id: <span id="match-id-label"></span> · 比赛时长 <span id="duration-label">0:00</span> · 共 <span id="ward-count">0</span> 条眼位</p>
+    <div class="vision-layout">
+      <div class="vision-map-wrap">
+        <canvas id="vision-canvas" width="512" height="512"></canvas>
+      </div>
+      <div class="vision-side">
+        <div class="section">
+          <div class="section-title">全部时间</div>
+          <div class="time-bar-wrap">
+            <input type="range" id="time-slider" min="0" max="3600" value="0" step="1" />
+            <div class="time-label" id="time-label">0:00</div>
+            <div class="time-ticks" id="time-ticks" style="font-size:0.75rem;color:#666;margin-top:4px;"></div>
+          </div>
+        </div>
+        <div class="section team-toggles">
+          <div class="section-title">队伍</div>
+          <label><input type="checkbox" id="toggle-radiant" checked /> <span class="team-radiant">天辉 (Radiant)</span></label>
+          <label><input type="checkbox" id="toggle-dire" checked /> <span class="team-dire">夜魇 (Dire)</span></label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      var MAP_SIZE = 256;
+      var CANVAS_SIZE = 512;
+      // 底图：使用本地 asset/detailed_740.webp，由 /api/map-image 提供
+      var MAP_IMAGE_URL = '/api/map-image';
+      var mapImage = new Image();
+      mapImage.onload = function() { if (state.wards.length) drawMapAndVision(); };
+      mapImage.onerror = function() {};
+      mapImage.src = MAP_IMAGE_URL;
+
+      var OBS_RADIUS = 1400 / 16384 * MAP_SIZE;
+      var SEN_RADIUS = 200 / 16384 * MAP_SIZE;
+      var OBS_DURATION = 360;
+      var SEN_DURATION = 420;
+
+      var formSection = document.getElementById('form-section');
+      var heatmapSection = document.getElementById('heatmap-section');
+      var matchIdInput = document.getElementById('match-id-input');
+      var formMsg = document.getElementById('form-msg');
+      var btnGo = document.getElementById('btn-go');
+      var canvas = document.getElementById('vision-canvas');
+      var timeSlider = document.getElementById('time-slider');
+      var timeLabel = document.getElementById('time-label');
+      var toggleRadiant = document.getElementById('toggle-radiant');
+      var toggleDire = document.getElementById('toggle-dire');
+
+      var state = { durationSec: 3600, wards: [], matchId: '' };
+
+      function getMatchIdFromUrl() {
+        var params = new URLSearchParams(window.location.search);
+        return params.get('match_id') || '';
+      }
+
+      function loadHeatmap(matchId) {
+        matchId = (matchId || '').trim();
+        if (!matchId) {
+          formMsg.textContent = '请输入 match_id';
+          formMsg.className = 'hint err';
+          return;
+        }
+        formMsg.textContent = '加载中…';
+        formMsg.className = 'hint loading';
+        btnGo.disabled = true;
+        fetch('/api/heatmap?match_id=' + encodeURIComponent(matchId))
+          .then(function(r) {
+            if (!r.ok) throw new Error(r.status === 500 ? (r.statusText || 'OpenDota 未解析该场或请求失败') : 'match_id 无效');
+            return r.json();
+          })
+          .then(function(payload) {
+            state.wards = payload.wards || [];
+            state.durationSec = payload.duration_sec > 0 ? payload.duration_sec : 3600;
+            state.matchId = matchId;
+            formSection.style.display = 'none';
+            heatmapSection.style.display = 'block';
+            document.getElementById('match-id-label').textContent = matchId;
+            document.getElementById('ward-count').textContent = state.wards.length;
+            document.getElementById('duration-label').textContent = fmtTime(state.durationSec);
+            timeSlider.max = state.durationSec;
+            timeSlider.value = 0;
+            updateTimeLabel(0);
+            var ticks = document.getElementById('time-ticks');
+            var step = state.durationSec <= 600 ? 60 : (state.durationSec <= 3600 ? 300 : 600);
+            var parts = [];
+            for (var i = 0; i <= state.durationSec; i += step) parts.push(fmtTime(i));
+            ticks.textContent = parts.join(' · ');
+            drawMapAndVision();
+          })
+          .catch(function(e) {
+            formMsg.textContent = '加载失败: ' + e.message;
+            formMsg.className = 'hint err';
+          })
+          .then(function() { btnGo.disabled = false; });
+      }
+
+      function fmtTime(sec) {
+        var m = Math.floor(sec / 60);
+        var s = Math.floor(sec % 60);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      function updateTimeLabel(sec) {
+        timeLabel.textContent = fmtTime(sec);
+      }
+
+      function wardsVisibleAtTime(t) {
+        var showRadiant = toggleRadiant.checked;
+        var showDire = toggleDire.checked;
+        return state.wards.filter(function(w) {
+          if (w.team_id === 2 && !showRadiant) return false;
+          if (w.team_id === 3 && !showDire) return false;
+          var dur = w.ward_type === 'observer' ? OBS_DURATION : SEN_DURATION;
+          if (w.duration_sec > 0) dur = w.duration_sec;
+          return w.game_time_sec <= t && (w.game_time_sec + dur) >= t;
+        });
+      }
+
+      function drawMapBase(ctx) {
+        var s = CANVAS_SIZE;
+        if (mapImage.complete && mapImage.naturalWidth > 0) {
+          ctx.drawImage(mapImage, 0, 0, mapImage.naturalWidth, mapImage.naturalHeight, 0, 0, s, s);
+          return;
+        }
+        ctx.save();
+        ctx.fillStyle = '#1a2e1a';
+        ctx.fillRect(0, 0, s, s);
+        ctx.restore();
+      }
+
+      function drawVision(ctx, wards) {
+        var s = CANVAS_SIZE;
+        var scale = s / MAP_SIZE;
+        wards.forEach(function(w) {
+          var x = (w.pos_x / MAP_SIZE) * s;
+          var y = (1 - w.pos_y / MAP_SIZE) * s;
+          var r = (w.ward_type === 'observer' ? OBS_RADIUS : SEN_RADIUS) * scale;
+          var isRadiant = w.team_id === 2;
+          ctx.save();
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 2;
+          ctx.fillStyle = isRadiant ? 'rgba(0,180,80,0.35)' : 'rgba(220,60,60,0.35)';
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isRadiant ? 'rgba(0,200,100,0.6)' : 'rgba(240,80,80,0.6)';
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
+        });
+      }
+
+      function drawMapAndVision() {
+        var t = parseInt(timeSlider.value, 10) || 0;
+        var visible = wardsVisibleAtTime(t);
+        var ctx = canvas.getContext('2d');
+        drawMapBase(ctx);
+        drawVision(ctx, visible);
+      }
+
+      timeSlider.addEventListener('input', function() {
+        var t = parseInt(timeSlider.value, 10) || 0;
+        updateTimeLabel(t);
+        drawMapAndVision();
+      });
+
+      toggleRadiant.addEventListener('change', drawMapAndVision);
+      toggleDire.addEventListener('change', drawMapAndVision);
+
+      btnGo.onclick = function() {
+        var id = matchIdInput.value.trim() || getMatchIdFromUrl();
+        if (id) loadHeatmap(id);
+        else formMsg.textContent = '请输入 match_id';
+      };
+
+      if (getMatchIdFromUrl()) {
+        matchIdInput.value = getMatchIdFromUrl();
+        loadHeatmap(getMatchIdFromUrl());
+      }
+    })();
+  </script>
+</body>
+</html>

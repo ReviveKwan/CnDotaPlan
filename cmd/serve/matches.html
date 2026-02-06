@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>最近 30 场 - CnDotaPlan</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+    h1 { font-size: 1.4rem; }
+    .back { margin-bottom: 16px; }
+    .back a { color: #8af; text-decoration: none; }
+    .back a:hover { text-decoration: underline; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #333; }
+    th { color: #888; font-weight: 600; }
+    tr:hover { background: #252540; }
+    .win { color: #6e8; }
+    .lose { color: #e86; }
+    a { color: #6af; }
+    .loading { color: #888; }
+    .err { color: #f88; }
+    .duration { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <div class="back"><a href="/">← 返回战队列表</a></div>
+  <h1 id="title">最近 30 场比赛</h1>
+  <p id="status" class="loading">加载中…</p>
+  <table id="table" style="display:none;">
+    <thead>
+      <tr>
+        <th>match_id</th>
+        <th>对手</th>
+        <th>结果</th>
+        <th>时长</th>
+        <th>开始时间</th>
+        <th>链接</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <script>
+    (function() {
+      var path = window.location.pathname;
+      var m = path.match(/^\/teams\/(\d+)\/matches\/?$/);
+      var teamId = m ? m[1] : '';
+      if (!teamId) {
+        document.getElementById('status').textContent = '无效的战队 ID';
+        document.getElementById('status').className = 'err';
+        return;
+      }
+      var params = new URLSearchParams(window.location.search);
+      var teamName = params.get('name') || '';
+      function setTitle(name) {
+        var text = (name && name.trim()) ? (name.trim() + ' 最近 30 场比赛') : ('战队 ' + teamId + ' 最近 30 场比赛');
+        document.getElementById('title').textContent = text;
+      }
+      setTitle(teamName);
+      if (!teamName || !teamName.trim()) {
+        fetch('/api/teams/' + teamId)
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(t) {
+            if (t && (t.name || t.tag)) setTitle(t.name || t.tag);
+          })
+          .catch(function() {});
+      }
+
+      fetch('/api/teams/' + teamId + '/matches?limit=30')
+        .then(function(r) { return r.json(); })
+        .then(function(matches) {
+          var status = document.getElementById('status');
+          var table = document.getElementById('table');
+          var tbody = document.getElementById('tbody');
+          var total = matches && matches.length ? matches.length : 0;
+          var wins = 0, losses = 0;
+          status.className = '';
+          table.style.display = 'table';
+          tbody.innerHTML = '';
+          (matches || []).forEach(function(m) {
+            var tr = document.createElement('tr');
+            var isRadiant = m.radiant === true || m.radiant === 1 || m.radiant === 'true';
+            var radiantWon = m.radiant_win === true || m.radiant_win === 1 || m.radiant_win === 'true';
+            var win = null;
+            if (m.radiant_win !== undefined && m.radiant !== undefined) {
+              win = (isRadiant && radiantWon) || (!isRadiant && !radiantWon);
+            } else if (m.radiant_score != null && m.dire_score != null && m.radiant !== undefined) {
+              win = isRadiant ? (m.radiant_score > m.dire_score) : (m.dire_score > m.radiant_score);
+            }
+            if (win === true) wins++;
+            else if (win === false) losses++;
+            var result = win === true ? '<span class="win">胜</span>' : (win === false ? '<span class="lose">负</span>' : '-');
+            var durationSec = m.duration;
+            var durationStr = durationSec != null ? (Math.floor(durationSec / 60) + ':' + String(durationSec % 60).padStart(2, '0')) : '-';
+            var startTime = m.start_time;
+            var startStr = startTime != null ? (new Date(startTime * 1000).toLocaleString('zh-CN')) : '-';
+            var opponent = (m.opposing_team_name || (m.opposing_team_id != null ? ('#' + m.opposing_team_id) : '')) || '-';
+            var matchId = m.match_id != null ? m.match_id : '-';
+            var link = matchId !== '-' ? ('https://www.opendota.com/matches/' + matchId) : '#';
+            tr.innerHTML =
+              '<td>' + matchId + '</td>' +
+              '<td>' + opponent + '</td>' +
+              '<td>' + result + '</td>' +
+              '<td class="duration">' + durationStr + '</td>' +
+              '<td>' + startStr + '</td>' +
+              '<td>' + (link !== '#' ? '<a href="' + link + '" target="_blank" rel="noopener">OpenDota</a>' : '-') + '</td>';
+            tbody.appendChild(tr);
+          });
+          status.textContent = '共 ' + total + ' 场，' + wins + ' 胜 ' + losses + ' 负';
+        })
+        .catch(function(e) {
+          document.getElementById('status').textContent = '加载失败: ' + e.message;
+          document.getElementById('status').className = 'err';
+        });
+    })();
+  </script>
+</body>
+</html>
